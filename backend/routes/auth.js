@@ -157,10 +157,14 @@ router.get('/me', authenticateToken, async (req, res) => {
 router.put('/profile', authenticateToken, async (req, res) => {
   try {
     const { full_name, avatar_url } = req.body;
-    
+
+    // Remplace undefined par null (MySQL n'accepte pas undefined)
+    const fullName = typeof full_name === 'undefined' ? null : full_name;
+    const avatarUrl = typeof avatar_url === 'undefined' ? null : avatar_url;
+
     await pool.execute(
       'UPDATE users SET full_name = ?, avatar_url = ? WHERE id = ?',
-      [full_name, avatar_url, req.user.id]
+      [fullName, avatarUrl, req.user.id]
     );
 
     const [users] = await pool.execute(
@@ -178,5 +182,6 @@ router.put('/profile', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 module.exports = router;

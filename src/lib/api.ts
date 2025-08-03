@@ -75,6 +75,11 @@ export const groupsAPI = {
 
   removeMember: (id: string, userId: string) =>
     api.delete(`/groups/${id}/members/${userId}`),
+
+  getAllMembers: (id: string) => api.get(`/groups/${id}/all-members`),
+
+  getWithMembers: () => api.get('/groups/with-members'),
+
 };
 
 // --------------------- Expenses API ---------------------

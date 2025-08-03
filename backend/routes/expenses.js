@@ -103,70 +103,57 @@ router.post('/', authenticateToken, validateRequest(schemas.createExpense), asyn
       participants
     });
 
-    // Convert string IDs to integers for database
     const groupIdInt = parseInt(group_id);
     const paidByInt = parseInt(paid_by);
     const userIdInt = parseInt(req.user.id);
 
-    console.log('Creating expense with data:', {
-      group_id,
-      description,
-      amount,
-      currency,
-      category,
-      date,
-      split_type,
-      paid_by,
-      participants
-    });
-
-    // Check if user is member of the group
+    // Vérifie que l'utilisateur créateur est bien membre du groupe
     const [membership] = await pool.execute(
       'SELECT id FROM group_members WHERE group_id = ? AND user_id = ?',
-      [safe(groupIdInt), safe(userIdInt)]
+      [groupIdInt, userIdInt]
     );
 
     if (membership.length === 0) {
       return res.status(403).json({ error: 'Access denied to this group' });
     }
 
-    // Validate that paid_by user is a member of the group
+    // Vérifie que celui qui a payé est bien membre (obligatoirement un user enregistré)
     const [paidByMembership] = await pool.execute(
       'SELECT id FROM group_members WHERE group_id = ? AND user_id = ?',
-      [safe(groupIdInt), safe(paidByInt)]
+      [groupIdInt, paidByInt]
     );
 
     if (paidByMembership.length === 0) {
       return res.status(400).json({ error: 'Paid by user is not a member of this group' });
     }
 
-    // Validate participants are members of the group
+    // Validation des participants (users OU pending_members)
     const participantIds = participants.map(p => parseInt(p.user_id));
-    
+
     if (participantIds.length === 0) {
       return res.status(400).json({ error: 'At least one participant is required' });
     }
-    
+
     const [validParticipants] = await pool.execute(
-      `SELECT user_id FROM group_members WHERE group_id = ? AND user_id IN (${participantIds.map(() => '?').join(',')})`,
-      [safe(groupIdInt), ...participantIds.map(safe)]
+      `
+        SELECT user_id as id FROM group_members 
+        WHERE group_id = ? AND user_id IN (${participantIds.map(() => '?').join(',')})
+        UNION
+        SELECT id FROM pending_members 
+        WHERE group_id = ? AND id IN (${participantIds.map(() => '?').join(',')})
+      `,
+      [groupIdInt, ...participantIds, groupIdInt, ...participantIds]
     );
 
     if (validParticipants.length !== participants.length) {
-      console.log('Validation failed:', {
-        validParticipants: validParticipants.map(p => p.user_id),
-        requestedParticipants: participantIds
-      });
-      console.log('Valid participants:', validParticipants);
-      console.log('Requested participants:', participantIds);
-      return res.status(400).json({ 
-        error: 'Some participants are not members of this group',
-        validParticipants: validParticipants.map(p => p.user_id),
+      return res.status(400).json({
+        error: 'Some participants are not valid group members or pending members',
+        validParticipants: validParticipants.map(p => p.id),
         requestedParticipants: participantIds
       });
     }
 
-    // Validate total amount for custom split
+    // Vérifie le total si split_type = 'custom'
     if (split_type === 'custom') {
       const totalOwed = participants.reduce((sum, p) => sum + p.amount_owed, 0);
       if (Math.abs(totalOwed - amount) > 0.01) {
@@ -174,36 +161,36 @@ router.post('/', authenticateToken, validateRequest(schemas.createExpense), asyn
       }
     }
 
-    // Create expense
+    // Crée la dépense
     const [expenseResult] = await pool.execute(`
       INSERT INTO expenses (group_id, created_by, description, amount, currency, category, date, split_type, paid_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [safe(groupIdInt), safe(userIdInt), description, amount, currency, category, date, split_type, safe(paidByInt)]);
+    `, [groupIdInt, userIdInt, description, amount, currency, category, date, split_type, paidByInt]);
 
     const expenseId = expenseResult.insertId;
 
-    // Add participants
+    // Ajout des participants
     for (const participant of participants) {
-      const amountOwed = split_type === 'equal' 
-        ? amount / participants.length 
-        : participant.amount_owed;
-      
       const participantIdInt = parseInt(participant.user_id);
+      const amountOwed = split_type === 'equal'
+        ? amount / participants.length
+        : participant.amount_owed;
+
       const isPaid = participantIdInt === paidByInt;
 
       await pool.execute(`
         INSERT INTO expense_participants (expense_id, user_id, amount_owed, is_paid)
         VALUES (?, ?, ?, ?)
-      `, [expenseId, safe(participantIdInt), amountOwed, isPaid]);
+      `, [expenseId, participantIdInt, amountOwed, isPaid]);
     }
 
-    // Update group total expenses
+    // Mise à jour du total des dépenses du groupe
     await pool.execute(
       'UPDATE groups_table SET total_expenses = total_expenses + ? WHERE id = ?',
-      [safe(amount), safe(groupIdInt)]
+      [amount, groupIdInt]
     );
 
-    // Get created expense with details
+    // Récupérer la dépense créée pour affichage
     const [createdExpense] = await pool.execute(`
       SELECT e.*, 
              u1.full_name as created_by_name,
@@ -213,8 +200,6 @@ router.post('/', authenticateToken, validateRequest(schemas.createExpense), asyn
       LEFT JOIN users u2 ON e.paid_by = u2.id
       WHERE e.id = ?
     `, [expenseId]);
-
-    console.log('Expense created successfully:', createdExpense[0]);
 
     res.status(201).json({
       message: 'Expense created successfully',
@@ -226,6 +211,7 @@ router.post('/', authenticateToken, validateRequest(schemas.createExpense), asyn
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 // Update expense
 router.put('/:id', authenticateToken, async (req, res) => {

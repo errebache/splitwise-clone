@@ -8,46 +8,46 @@ const router = express.Router();
 
 // Generate invitation code and link for a group
 router.post('/groups/:groupId/generate', authenticateToken, async (req, res) => {
-  try {
-    const groupId = req.params.groupId;
-    const { maxUses, expiresInDays = 7 } = req.body;
-
-    // Check if user is admin of the group
-    const [membership] = await pool.execute(
-      'SELECT role FROM group_members WHERE group_id = ? AND user_id = ?',
-      [groupId, req.user.id]
-    );
-
-    if (membership.length === 0 || membership[0].role !== 'admin') {
-      return res.status(403).json({ error: 'Only group admins can generate invitations' });
+    try {
+      const groupId = req.params.groupId;
+      const { maxUses = 1, expiresInDays = 7 } = req.body;
+  
+      // Check admin rights
+      const [membership] = await pool.execute(
+        'SELECT role FROM group_members WHERE group_id = ? AND user_id = ?',
+        [groupId, req.user.id]
+      );
+  
+      if (membership.length === 0 || membership[0].role !== 'admin') {
+        return res.status(403).json({ error: 'Only group admins can generate invitations' });
+      }
+  
+      // Generate code & link
+      const invitationCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const invitationToken = crypto.randomBytes(32).toString('hex');
+      const invitationLink = `${process.env.FRONTEND_URL}/join/${invitationToken}`;
+  
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + expiresInDays);
+  
+      // Insert
+      await pool.execute(`
+        INSERT INTO group_invitations (group_id, invitation_code, invitation_link, created_by, expires_at, max_uses)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `, [groupId, invitationCode, invitationLink, req.user.id, expiresAt, maxUses]);
+  
+      res.json({
+        invitationCode,
+        invitationLink,
+        expiresAt: expiresAt.toISOString()
+      });
+  
+    } catch (error) {
+      console.error('Generate invitation error:', error);
+      res.status(500).json({ error: 'Internal server error' });
     }
-
-    // Generate unique code and link
-    const invitationCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const invitationToken = crypto.randomBytes(32).toString('hex');
-    const invitationLink = `${process.env.FRONTEND_URL}/join/${invitationToken}`;
-    
-    // Calculate expiration date
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + expiresInDays);
-
-    // Create invitation
-    await pool.execute(`
-      INSERT INTO group_invitations (group_id, invitation_code, invitation_link, created_by, expires_at, max_uses)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `, [groupId, invitationCode, invitationLink, req.user.id, expiresAt, maxUses]);
-
-    res.json({
-      invitationCode,
-      invitationLink,
-      expiresAt: expiresAt.toISOString()
-    });
-
-  } catch (error) {
-    console.error('Generate invitation error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
+  });
+  
 
 // Add participant to group
 router.post('/groups/:groupId/participants', authenticateToken, async (req, res) => {
