@@ -110,9 +110,18 @@ export function useAuth() {
   };
 
   const signOut = async () => {
+    // Remove any persisted authentication state and clear the local user
     localStorage.removeItem('auth_token');
     localStorage.removeItem('current_user');
     setUser(null);
+    /*
+     * Force a full page reload after logging out. Because each call to
+     * `useAuth` maintains its own state, simply clearing the user here
+     * doesn't propagate to other instances of the hook (e.g. in `App`).
+     * Reloading ensures that every component re-runs its auth check and
+     * the router displays the correct public views (login or sign up).
+     */
+    window.location.reload();
     return { error: null };
   };
 
