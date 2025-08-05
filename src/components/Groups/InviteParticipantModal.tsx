@@ -39,6 +39,9 @@ export function InviteParticipantModal({ groupId, groupName, onClose, onSuccess 
     email: '',
   });
 
+  // Store the generated invitation link when sending via email
+  const [emailInvitationLink, setEmailInvitationLink] = useState<string | null>(null);
+
   const handleAddParticipant = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -110,14 +113,29 @@ export function InviteParticipantModal({ groupId, groupName, onClose, onSuccess 
     setLoading(true);
     setError('');
     setSuccess('');
+    setEmailInvitationLink(null);
 
     try {
-      await invitationsAPI.sendEmailInvitation(groupId, {
+      // Send the invitation by email and capture the returned link
+      const response = await invitationsAPI.sendEmailInvitation(groupId, {
         name: emailData.name.trim(),
         email: emailData.email.trim(),
       });
 
-      setSuccess(`Invitation envoyée à ${emailData.email} !`);
+      // The backend returns an invitationLink and a flag indicating if the email was sent
+      const link = response?.data?.invitationLink;
+      const mailSent = response?.data?.mailSent;
+      if (link) {
+        setEmailInvitationLink(link);
+      }
+
+      // Customize success message based on whether the email was actually sent
+      if (mailSent) {
+        setSuccess(`Invitation envoyée par e‑mail à ${emailData.email} et lien généré !`);
+      } else {
+        setSuccess(`Invitation générée pour ${emailData.email}. Copiez le lien ci‑dessous pour l'envoyer manuellement.`);
+      }
+
       setEmailData({ name: '', email: '' });
       onSuccess();
     } catch (err: any) {
@@ -353,47 +371,72 @@ export function InviteParticipantModal({ groupId, groupName, onClose, onSuccess 
 
           {/* Email Tab */}
           {activeTab === 'email' && (
-            <form onSubmit={handleSendEmail} className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Nom du destinataire *
-                </label>
-                <input
-                  type="text"
-                  value={emailData.name}
-                  onChange={(e) => setEmailData(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors"
-                  placeholder="ex: Marie Dupont"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Adresse email *
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
+            <>
+              <form onSubmit={handleSendEmail} className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nom du destinataire *
+                  </label>
                   <input
-                    type="email"
-                    value={emailData.email}
-                    onChange={(e) => setEmailData(prev => ({ ...prev, email: e.target.value }))}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors"
-                    placeholder="marie@example.com"
+                    type="text"
+                    value={emailData.name}
+                    onChange={(e) => setEmailData(prev => ({ ...prev, name: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors"
+                    placeholder="ex: Marie Dupont"
                     required
                   />
                 </div>
-              </div>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-gradient-to-r from-purple-500 to-purple-600 text-white px-4 py-3 rounded-lg hover:from-purple-600 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
-              >
-                <Send className="h-4 w-4" />
-                <span>{loading ? 'Envoi...' : 'Envoyer l\'invitation'}</span>
-              </button>
-            </form>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Adresse email *
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
+                    <input
+                      type="email"
+                      value={emailData.email}
+                      onChange={(e) => setEmailData(prev => ({ ...prev, email: e.target.value }))}
+                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors"
+                      placeholder="marie@example.com"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-gradient-to-r from-purple-500 to-purple-600 text-white px-4 py-3 rounded-lg hover:from-purple-600 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                >
+                  <Send className="h-4 w-4" />
+                  <span>{loading ? 'Envoi...' : 'Envoyer l\'invitation'}</span>
+                </button>
+              </form>
+
+              {/* Display the invitation link after sending the email */}
+              {emailInvitationLink && (
+                <div className="mt-6 space-y-2 p-4 bg-gray-50 rounded-lg">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Lien envoyé (copiez pour SMS ou partager)
+                  </label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="text"
+                      value={emailInvitationLink}
+                      readOnly
+                      className="flex-1 px-4 py-3 bg-white border border-gray-300 rounded-lg text-sm"
+                    />
+                    <button
+                      onClick={() => copyToClipboard(emailInvitationLink)}
+                      className="px-4 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
+                    >
+                      <Link className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { X, CreditCard, Users, Calculator } from 'lucide-react';
 import { Group, GroupMember, User } from '../../types';
-import { groupsAPI } from '../../lib/api';
+import { groupsAPI, invitationsAPI } from '../../lib/api';
+import { getDisplayName, getInitials } from '../../lib/displayName';
 import { useAuth } from '../../hooks/useAuth';
 
 interface AddExpenseModalProps {
@@ -55,45 +56,77 @@ export function AddExpenseModal({ group, onClose, onSubmit }: AddExpenseModalPro
       setMembersError('');
       
       const response = await groupsAPI.getById(group.id);
+      // The backend may return only `members` including pending; for backward compatibility
       const groupMembers = response.data.members || [];
       const pendingMembers = response.data.pendingMembers || [];
-      
-      console.log('Fetched group members:', groupMembers);
-      console.log('Fetched pending members:', pendingMembers);
-      
-      // Combine registered and pending members
+
+      // Map pendingMembers (from legacy API) into member-like objects
+      const mappedPendingMembers = pendingMembers.map((pm: any) => ({
+        id: `pending_${pm.id}`,
+        group_id: pm.group_id,
+        user_id: `pending_${pm.id}`,
+        role: 'member' as const,
+        joined_at: pm.created_at,
+        user: {
+          id: `pending_${pm.id}`,
+          email: pm.email,
+          full_name: pm.temporary_name,
+          created_at: pm.created_at,
+          subscription_status: 'free' as const,
+        },
+        isPending: true,
+      }));
+
+      // Fetch unregistered participants invited via invitation API
+      let participantMembers: any[] = [];
+      try {
+        const participantsResponse = await invitationsAPI.getParticipants(group.id);
+        const participantsData = participantsResponse.data?.participants || [];
+        participantMembers = participantsData
+          // include only participants that are not yet registered (no user_id)
+          .filter((p: any) => !p.user_id)
+          .map((p: any) => ({
+            id: `participant_${p.id}`,
+            group_id: p.group_id,
+            user_id: `participant_${p.id}`,
+            role: 'participant' as const,
+            joined_at: p.created_at,
+            user: {
+              id: `participant_${p.id}`,
+              email: p.email || p.registered_email || undefined,
+              full_name: p.name || p.registered_name || '',
+              created_at: p.created_at,
+              subscription_status: 'free' as const,
+            },
+            isPending: true,
+          }));
+      } catch (err) {
+        console.warn('Error fetching group participants', err);
+      }
+
+      // Combine registered members (groupMembers may include pending) with mapped pending and participant members
       const allMembers = [
         ...groupMembers,
-        ...pendingMembers.map(pm => ({
-          id: `pending_${pm.id}`,
-          group_id: pm.group_id,
-          user_id: `pending_${pm.id}`,
-          role: 'member' as const,
-          joined_at: pm.created_at,
-          user: {
-            id: `pending_${pm.id}`,
-            email: pm.email,
-            full_name: pm.temporary_name,
-            created_at: pm.created_at,
-            subscription_status: 'free' as const
-          },
-          isPending: true
-        }))
+        ...mappedPendingMembers,
+        ...participantMembers,
       ];
-      
+
       setMembers(allMembers);
-      
-      // Initialiser les participants avec tous les membres sélectionnés
-      const initialParticipants = allMembers.map(member => ({
+
+      // Initialize the participant selection list with all members selected by default
+      const initialParticipants = allMembers.map((member: any) => ({
         user_id: member.user_id,
         amount_owed: 0,
-        selected: true
+        selected: true,
       }));
-      
-      setFormData(prev => ({
+
+      setFormData((prev) => ({
         ...prev,
         participants: initialParticipants,
-        paid_by: currentUser?.id || (allMembers.find(m => !m.isPending)?.user_id || allMembers[0]?.user_id || '')
+        // Default payer: current user if defined, otherwise first non-pending member
+        paid_by:
+          currentUser?.id ||
+          ((allMembers.find((m: any) => !m.isPending) as any)?.user_id || allMembers[0]?.user_id || ''),
       }));
       
     } catch (err: any) {
@@ -228,14 +261,19 @@ export function AddExpenseModal({ group, onClose, onSubmit }: AddExpenseModalPro
   };
 
   const getMemberName = (userId: string) => {
-    const member = members.find(m => m.user_id === userId);
-    const name = member?.user?.full_name || member?.user?.email || 'Utilisateur inconnu';
-    return member?.isPending ? `${name} (en attente)` : name;
+    const member = members.find((m) => m.user_id === userId);
+    if (!member) return '';
+    // Display "Moi" for the current user when not pending
+    if (currentUser && member.user_id === currentUser.id && !(member as any).isPending) {
+      return 'Moi';
+    }
+    const displayName = getDisplayName(member.user);
+    return (member as any).isPending ? `${displayName} (en attente)` : displayName;
   };
 
   const getMemberInitials = (userId: string) => {
     const name = getMemberName(userId);
-    return name.split(' ').map(n => n.charAt(0)).join('').toUpperCase().slice(0, 2);
+    return getInitials(name);
   };
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -337,14 +375,14 @@ export function AddExpenseModal({ group, onClose, onSubmit }: AddExpenseModalPro
               onChange={(e) => setFormData(prev => ({ ...prev, paid_by: e.target.value }))}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
             >
-              {members.filter(m => !m.isPending).map((member) => (
+              {members.filter((m: any) => !m.isPending).map((member) => (
                 <option key={member.user_id} value={member.user_id}>
                   {getMemberName(member.user_id)}
                 </option>
               ))}
-              {members.filter(m => m.isPending).length > 0 && (
+              {members.filter((m: any) => m.isPending).length > 0 && (
                 <optgroup label="Membres en attente d'inscription">
-                  {members.filter(m => m.isPending).map((member) => (
+                  {members.filter((m: any) => m.isPending).map((member) => (
                     <option key={member.user_id} value={member.user_id} disabled>
                       {getMemberName(member.user_id)} - Ne peut pas payer
                     </option>

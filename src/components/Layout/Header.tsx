@@ -15,7 +15,9 @@ export function Header({ title = 'SplitWise', showBack, onBack, onJoinByCode }: 
   const { t } = useTranslation();
   const { user, signOut, isTrialActive, trialDaysLeft } = useAuth();
 
+
   const handleSignOut = async () => {
+    // Trigger the sign-out logic; the page will reload via the auth hook
     await signOut();
   };
 
