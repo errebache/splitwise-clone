@@ -1,6 +1,14 @@
 const express = require('express');
 const crypto = require('crypto');
 const { pool } = require('../config/database');
+// Optional: use nodemailer for sending real invitation emails
+let nodemailer;
+try {
+  // Dynamically import nodemailer to avoid issues when not installed
+  nodemailer = require('nodemailer');
+} catch (e) {
+  nodemailer = null;
+}
 const { authenticateToken, optionalAuth } = require('../middleware/auth');
 const { validateRequest, schemas } = require('../middleware/validation');
 
@@ -335,18 +343,46 @@ router.post('/groups/:groupId/invite-email', authenticateToken, async (req, res)
       VALUES (?, ?, ?, ?, ?)
     `, [groupId, name, email, invitationToken, req.user.id]);
 
-    // Here you would integrate with an email service (SendGrid, Mailgun, etc.)
-    // For now, we'll just return the invitation link
-    
+    // Optionally send a real email invitation if SMTP configuration is provided
+    let mailSent = false;
+    if (nodemailer && process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      try {
+        const transporter = nodemailer.createTransport({
+          host: process.env.SMTP_HOST,
+          port: parseInt(process.env.SMTP_PORT || '587', 10),
+          secure: process.env.SMTP_SECURE === 'true',
+          auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS,
+          },
+        });
+
+        const mailOptions = {
+          from: process.env.SMTP_FROM || 'no-reply@splitwise-clone.local',
+          to: email,
+          subject: `Invitation à rejoindre ${groups[0].name}`,
+          text: `Bonjour ${name},\n\nVous avez été invité·e à rejoindre le groupe ${groups[0].name}. Cliquez sur ce lien pour rejoindre : ${invitationLink}\n\nÀ bientôt !`,
+          html: `<p>Bonjour ${name},</p><p>Vous avez été invité·e à rejoindre le groupe <strong>${groups[0].name}</strong>.</p><p>Cliquez sur ce lien pour rejoindre : <a href="${invitationLink}">${invitationLink}</a></p><p>À bientôt !</p>`,
+        };
+
+        await transporter.sendMail(mailOptions);
+        mailSent = true;
+      } catch (mailErr) {
+        console.error('Failed to send invitation email:', mailErr);
+      }
+    }
+
+    // Respond with whether the email was sent and include the link for verification
     res.json({
       message: 'Invitation sent successfully',
       invitationLink,
-      // In a real app, you wouldn't return the link for security
+      mailSent,
+      // Include debug info only in development for manual sending or testing
       debug: {
         to: email,
-        subject: `Invitation to join ${groups[0].name}`,
-        invitationLink
-      }
+        subject: `Invitation à rejoindre ${groups[0].name}`,
+        invitationLink,
+      },
     });
 
   } catch (error) {
