@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CreditCard, Users, Calculator } from 'lucide-react';
 import { Group, GroupMember, User } from '../../types';
-import { groupsAPI } from '../../lib/api';
+import { groupsAPI, invitationsAPI } from '../../lib/api';
 import { getDisplayName, getInitials } from '../../lib/displayName';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -56,46 +56,77 @@ export function AddExpenseModal({ group, onClose, onSubmit }: AddExpenseModalPro
       setMembersError('');
       
       const response = await groupsAPI.getById(group.id);
+      // The backend may return only `members` including pending; for backward compatibility
       const groupMembers = response.data.members || [];
       const pendingMembers = response.data.pendingMembers || [];
-      
-      console.log('Fetched group members:', groupMembers);
-      console.log('Fetched pending members:', pendingMembers);
-      
-      // Combine registered and pending members
+
+      // Map pendingMembers (from legacy API) into member-like objects
+      const mappedPendingMembers = pendingMembers.map((pm: any) => ({
+        id: `pending_${pm.id}`,
+        group_id: pm.group_id,
+        user_id: `pending_${pm.id}`,
+        role: 'member' as const,
+        joined_at: pm.created_at,
+        user: {
+          id: `pending_${pm.id}`,
+          email: pm.email,
+          full_name: pm.temporary_name,
+          created_at: pm.created_at,
+          subscription_status: 'free' as const,
+        },
+        isPending: true,
+      }));
+
+      // Fetch unregistered participants invited via invitation API
+      let participantMembers: any[] = [];
+      try {
+        const participantsResponse = await invitationsAPI.getParticipants(group.id);
+        const participantsData = participantsResponse.data?.participants || [];
+        participantMembers = participantsData
+          // include only participants that are not yet registered (no user_id)
+          .filter((p: any) => !p.user_id)
+          .map((p: any) => ({
+            id: `participant_${p.id}`,
+            group_id: p.group_id,
+            user_id: `participant_${p.id}`,
+            role: 'participant' as const,
+            joined_at: p.created_at,
+            user: {
+              id: `participant_${p.id}`,
+              email: p.email || p.registered_email || undefined,
+              full_name: p.name || p.registered_name || '',
+              created_at: p.created_at,
+              subscription_status: 'free' as const,
+            },
+            isPending: true,
+          }));
+      } catch (err) {
+        console.warn('Error fetching group participants', err);
+      }
+
+      // Combine registered members (groupMembers may include pending) with mapped pending and participant members
       const allMembers = [
         ...groupMembers,
-        ...pendingMembers.map(pm => ({
-          id: `pending_${pm.id}`,
-          group_id: pm.group_id,
-          user_id: `pending_${pm.id}`,
-          role: 'member' as const,
-          joined_at: pm.created_at,
-          user: {
-            id: `pending_${pm.id}`,
-            email: pm.email,
-            full_name: pm.temporary_name,
-            created_at: pm.created_at,
-            subscription_status: 'free' as const
-          },
-          isPending: true
-        }))
+        ...mappedPendingMembers,
+        ...participantMembers,
       ];
-      
+
       setMembers(allMembers);
-      
-      // Initialiser les participants avec tous les membres sélectionnés
-      const initialParticipants = allMembers.map(member => ({
+
+      // Initialize the participant selection list with all members selected by default
+      const initialParticipants = allMembers.map((member: any) => ({
         user_id: member.user_id,
         amount_owed: 0,
-        selected: true
+        selected: true,
       }));
-      
-      setFormData(prev => ({
+
+      setFormData((prev) => ({
         ...prev,
         participants: initialParticipants,
-        // Use the first non-pending member as the default payer if no current user
-        paid_by: currentUser?.id || ((allMembers.find((m: any) => !m.isPending) as any)?.user_id || allMembers[0]?.user_id || '')
+        // Default payer: current user if defined, otherwise first non-pending member
+        paid_by:
+          currentUser?.id ||
+          ((allMembers.find((m: any) => !m.isPending) as any)?.user_id || allMembers[0]?.user_id || ''),
       }));
       
     } catch (err: any) {
