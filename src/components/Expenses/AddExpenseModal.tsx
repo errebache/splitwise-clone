@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, CreditCard, Users, Calculator } from 'lucide-react';
 import { Group, GroupMember, User } from '../../types';
 import { groupsAPI } from '../../lib/api';
+import { getDisplayName, getInitials } from '../../lib/displayName';
 import { useAuth } from '../../hooks/useAuth';
 
 interface AddExpenseModalProps {
@@ -93,7 +94,8 @@ export function AddExpenseModal({ group, onClose, onSubmit }: AddExpenseModalPro
       setFormData(prev => ({
         ...prev,
         participants: initialParticipants,
-        paid_by: currentUser?.id || (allMembers.find(m => !m.isPending)?.user_id || allMembers[0]?.user_id || '')
+        // Use the first non-pending member as the default payer if no current user
+        paid_by: currentUser?.id || ((allMembers.find((m: any) => !m.isPending) as any)?.user_id || allMembers[0]?.user_id || '')
       }));
       
     } catch (err: any) {
@@ -228,14 +230,19 @@ export function AddExpenseModal({ group, onClose, onSubmit }: AddExpenseModalPro
   };
 
   const getMemberName = (userId: string) => {
-    const member = members.find(m => m.user_id === userId);
-    const name = member?.user?.full_name || member?.user?.email || 'Utilisateur inconnu';
-    return member?.isPending ? `${name} (en attente)` : name;
+    const member = members.find((m) => m.user_id === userId);
+    if (!member) return '';
+    // Display "Moi" for the current user when not pending
+    if (currentUser && member.user_id === currentUser.id && !(member as any).isPending) {
+      return 'Moi';
+    }
+    const displayName = getDisplayName(member.user);
+    return (member as any).isPending ? `${displayName} (en attente)` : displayName;
   };
 
   const getMemberInitials = (userId: string) => {
     const name = getMemberName(userId);
-    return name.split(' ').map(n => n.charAt(0)).join('').toUpperCase().slice(0, 2);
+    return getInitials(name);
   };
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -337,14 +344,14 @@ export function AddExpenseModal({ group, onClose, onSubmit }: AddExpenseModalPro
               onChange={(e) => setFormData(prev => ({ ...prev, paid_by: e.target.value }))}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
             >
-              {members.filter(m => !m.isPending).map((member) => (
+              {members.filter((m: any) => !m.isPending).map((member) => (
                 <option key={member.user_id} value={member.user_id}>
                   {getMemberName(member.user_id)}
                 </option>
               ))}
-              {members.filter(m => m.isPending).length > 0 && (
+              {members.filter((m: any) => m.isPending).length > 0 && (
                 <optgroup label="Membres en attente d'inscription">
-                  {members.filter(m => m.isPending).map((member) => (
+                  {members.filter((m: any) => m.isPending).map((member) => (
                     <option key={member.user_id} value={member.user_id} disabled>
                       {getMemberName(member.user_id)} - Ne peut pas payer
                     </option>
