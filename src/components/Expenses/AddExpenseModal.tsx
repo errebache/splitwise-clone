@@ -383,15 +383,15 @@ export function AddExpenseModal({ group, onClose, onSubmit }: AddExpenseModalPro
               {members.filter((m: any) => m.isPending).length > 0 && (
                 <optgroup label="Membres en attente d'inscription">
                   {members.filter((m: any) => m.isPending).map((member) => (
-                    <option key={member.user_id} value={member.user_id} disabled>
-                      {getMemberName(member.user_id)} - Ne peut pas payer
+                    <option key={member.user_id} value={member.user_id}>
+                      {getMemberName(member.user_id)}
                     </option>
                   ))}
                 </optgroup>
               )}
             </select>
             <p className="text-sm text-gray-500 mt-1">
-              Les membres en attente d'inscription ne peuvent pas être sélectionnés comme payeur
+              Les participants en attente peuvent être sélectionnés comme payeur. Lorsqu'ils s'inscriront, leurs dépenses payées leur seront automatiquement attribuées.
             </p>
           </div>
 
