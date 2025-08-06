@@ -34,10 +34,12 @@ export function JoinByCodeModal({ onClose }: JoinByCodeModalProps) {
             invitationCode: code.trim() 
           });
           
-          // Fermer le modal et rediriger vers les groupes
+          // Fermer le modal et rediriger vers la liste des groupes. We avoid a
+          // full page reload here so that the React state (including the
+          // authenticated user) remains intact. Navigating to the root of the
+          // application will trigger the GroupsView to fetch the updated list.
           onClose();
           navigate('/');
-          window.location.reload(); // Recharger pour voir le nouveau groupe
         } catch (acceptError: any) {
           setError(acceptError.response?.data?.error || 'Erreur lors de l\'adhésion au groupe');
         }

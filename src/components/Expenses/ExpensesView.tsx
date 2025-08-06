@@ -14,7 +14,15 @@ interface ExpensesViewProps {
 }
 
 export function ExpensesView({ group, onBack }: ExpensesViewProps) {
-  const { expenses, loading, addExpense, markExpenseAsSettled, calculateBalances, calculateSettlements } = useExpenses(group.id);
+  const {
+    expenses,
+    loading,
+    error,
+    addExpense,
+    markExpenseAsSettled,
+    calculateBalances,
+    calculateSettlements,
+  } = useExpenses(group.id);
   
   console.log('ExpensesView - group:', group);
   console.log('ExpensesView - expenses:', expenses);
@@ -60,6 +68,22 @@ export function ExpensesView({ group, onBack }: ExpensesViewProps) {
     }
     return { error };
   };
+
+  // If there was an error loading expenses (for example, the user is not
+  // authorized to view this group's expenses), surface the error to the user.
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 text-center space-y-4">
+        <p className="text-red-600 font-semibold">{error}</p>
+        <button
+          onClick={onBack}
+          className="px-4 py-2 mt-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+        >
+          Retour aux groupes
+        </button>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

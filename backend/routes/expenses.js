@@ -12,13 +12,25 @@ router.get('/group/:groupId', authenticateToken, async (req, res) => {
   try {
     const groupId = req.params.groupId;
 
-    // Check if user is member of the group
+    // Check if the authenticated user is allowed to view this group's expenses.
+    // A user can view expenses if they are:
+    //   1. A registered member/owner of the group (group_members)
+    //   2. A pending member invited by email (pending_members) – still unregistered
+    //   3. A participant invited by email (participants) – still unregistered
     const [membership] = await pool.execute(
       'SELECT id FROM group_members WHERE group_id = ? AND user_id = ?',
       [groupId, req.user.id]
     );
+    const [pending] = await pool.execute(
+      'SELECT id FROM pending_members WHERE group_id = ? AND email = ?',
+      [groupId, req.user.email]
+    );
+    const [participant] = await pool.execute(
+      'SELECT id FROM participants WHERE group_id = ? AND email = ? AND (user_id IS NULL OR user_id = ?)',
+      [groupId, req.user.email, req.user.id]
+    );
 
-    if (membership.length === 0) {
+    if (membership.length === 0 && pending.length === 0 && participant.length === 0) {
       return res.status(403).json({ error: 'Access denied to this group' });
     }
 

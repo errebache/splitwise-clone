@@ -9,19 +9,6 @@ try {
 } catch (e) {
   nodemailer = null;
 }
-
-// Optional: use Twilio for sending SMS invitations
-let twilioClient;
-try {
-  const Twilio = require('twilio');
-  if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-    twilioClient = new Twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  } else {
-    twilioClient = null;
-  }
-} catch (e) {
-  twilioClient = null;
-}
 const { authenticateToken, optionalAuth } = require('../middleware/auth');
 const { validateRequest, schemas } = require('../middleware/validation');
 
@@ -102,62 +89,10 @@ router.post('/groups/:groupId/participants', authenticateToken, async (req, res)
       [result.insertId]
     );
 
-    // Prepare to optionally send email and/or SMS
-    let emailSent = false;
-    let smsSent = false;
-    const invitationLink = `${process.env.FRONTEND_URL}/join/${invitationToken}`;
-    try {
-      // Fetch group name for message personalization
-      const [groups] = await pool.execute('SELECT name FROM groups_table WHERE id = ?', [groupId]);
-      const groupName = groups[0]?.name || '';
-      // Send email if email provided and smtp configured
-      if (email && nodemailer && process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-        const transporter = nodemailer.createTransport({
-          host: process.env.SMTP_HOST,
-          port: parseInt(process.env.SMTP_PORT || '587', 10),
-          secure: process.env.SMTP_SECURE === 'true',
-          auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS,
-          },
-        });
-        const mailOptions = {
-          from: process.env.SMTP_FROM || 'no-reply@splitwise-clone.local',
-          to: email,
-          subject: `Invitation à rejoindre ${groupName}`,
-          text: `Bonjour ${name},\n\nVous avez été invité·e à rejoindre le groupe ${groupName}. Cliquez sur ce lien pour rejoindre : ${invitationLink}\n\nÀ bientôt !`,
-          html: `<p>Bonjour ${name},</p><p>Vous avez été invité·e à rejoindre le groupe <strong>${groupName}</strong>.</p><p>Cliquez sur ce lien pour rejoindre : <a href="${invitationLink}">${invitationLink}</a></p><p>À bientôt !</p>`,
-        };
-        try {
-          await transporter.sendMail(mailOptions);
-          emailSent = true;
-        } catch (mailErr) {
-          console.error('Failed to send participant invitation email:', mailErr);
-        }
-      }
-      // Send SMS if phone provided and Twilio configured
-      if (phone && twilioClient && process.env.TWILIO_PHONE_NUMBER) {
-        try {
-          await twilioClient.messages.create({
-            body: `Bonjour ${name}, vous avez été invité·e à rejoindre le groupe ${groupName} sur SplitWise. Utilisez ce lien : ${invitationLink}`,
-            from: process.env.TWILIO_PHONE_NUMBER,
-            to: phone,
-          });
-          smsSent = true;
-        } catch (smsErr) {
-          console.error('Failed to send participant invitation SMS:', smsErr);
-        }
-      }
-    } catch (msgError) {
-      console.error('Error while sending participant invitation notifications:', msgError);
-    }
-
     res.status(201).json({
       message: 'Participant added successfully',
       participant: participants[0],
-      invitationLink,
-      emailSent,
-      smsSent,
+      invitationLink: `${process.env.FRONTEND_URL}/join/${invitationToken}`
     });
 
   } catch (error) {
@@ -338,41 +273,6 @@ router.post('/accept/:groupId', authenticateToken, async (req, res) => {
         'UPDATE participants SET user_id = ?, status = "registered" WHERE id = ? AND group_id = ?',
         [req.user.id, participantId, groupId]
       );
-
-      /**
-       * When a pending participant (without user_id) is converted into a registered user,
-       * we need to update historical expense records:
-       *   1) Update any expense_participants rows that reference the pending participant
-       *      to now reference the newly registered user.
-       *   2) For any expenses where that pending participant paid (is_paid = 1), update the
-       *      expense's paid_by field to point to the new user. During expense creation
-       *      we temporarily stored paid_by as the creator's user_id when a pending
-       *      participant was selected to pay, so this update reassigns it correctly.
-       */
-      try {
-        // Update expense_participants user_id for all expenses in this group
-        await pool.execute(
-          `UPDATE expense_participants ep
-           JOIN expenses e ON ep.expense_id = e.id
-           SET ep.user_id = ?
-           WHERE ep.user_id = ? AND e.group_id = ?`,
-          [req.user.id, participantId, groupId]
-        );
-
-        // Update expenses.paid_by where the pending participant paid the expense
-        await pool.execute(
-          `UPDATE expenses
-           SET paid_by = ?
-           WHERE group_id = ?
-             AND id IN (
-               SELECT expense_id FROM expense_participants
-               WHERE user_id = ? AND is_paid = 1
-             )`,
-          [req.user.id, groupId, participantId]
-        );
-      } catch (updateErr) {
-        console.error('Error updating expense records for registered participant:', updateErr);
-      }
     }
 
     // Check if user is already a member

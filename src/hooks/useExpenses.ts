@@ -33,7 +33,15 @@ export function useExpenses(groupId?: string) {
     } catch (err: any) {
       console.error('Error fetching expenses:', err);
       console.error('Error response:', err.response?.data);
-      // setError(err.response?.data?.error || 'Erreur lors du chargement des dépenses');
+      // When the backend returns a 403 status, the user is not allowed to view
+      // the expenses for this group. Surface this to the UI rather than
+      // silently failing and leaving an empty list which can cause
+      // downstream components to crash.
+      if (err.response?.status === 403) {
+        setError(err.response.data?.error || 'Accès refusé à ce groupe');
+      } else {
+        setError(err.response?.data?.error || 'Erreur lors du chargement des dépenses');
+      }
       setExpenses([]);
     } finally {
       console.log('fetchExpenses terminé, setting loading to false');

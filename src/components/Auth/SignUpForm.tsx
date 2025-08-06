@@ -40,7 +40,13 @@ export function SignUpForm({ onToggleMode }: SignUpFormProps) {
     try {
       const { error } = await signUp(formData.email, formData.password, formData.fullName);
       if (error) {
+        // Le backend peut renvoyer une erreur (email déjà utilisé, etc.).
         setError(error.message);
+      } else {
+        // Inscription réussie : bascule vers le formulaire de connexion
+        // afin que l'utilisateur saisisse ses identifiants fraîchement créés.
+        setError('');
+        onToggleMode();
       }
     } catch (err) {
       setError('Une erreur est survenue lors de l\'inscription');
@@ -71,6 +77,7 @@ export function SignUpForm({ onToggleMode }: SignUpFormProps) {
               {error}
             </div>
           )}
+
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>

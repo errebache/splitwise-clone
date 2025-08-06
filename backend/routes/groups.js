@@ -17,13 +17,18 @@ router.get('/', authenticateToken, async (req, res) => {
       FROM groups_table g
       LEFT JOIN users u ON g.created_by = u.id
       LEFT JOIN group_members gm ON g.id = gm.group_id
+      -- Inclure les groupes dans lesquels l'utilisateur est membre (group_members)
+      -- ou a été invité (pending_members ou participants) via son adresse e‑mail.
       WHERE g.id IN (
-        SELECT group_id FROM group_members 
-        WHERE user_id = ? OR email = ?
+        SELECT group_id FROM group_members WHERE user_id = ?
+        UNION
+        SELECT group_id FROM pending_members WHERE email = ?
+        UNION
+        SELECT group_id FROM participants WHERE email = ? AND (user_id IS NULL OR user_id = 0)
       )
       GROUP BY g.id, g.name, g.description, g.created_by, g.currency, g.total_expenses, g.created_at, g.updated_at, u.full_name
       ORDER BY g.updated_at DESC
-    `, [req.user.id, req.user.email]);
+    `, [req.user.id, req.user.email, req.user.email]);
     
     res.json({ groups });    
 

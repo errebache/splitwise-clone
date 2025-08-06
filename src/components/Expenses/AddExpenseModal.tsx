@@ -104,29 +104,53 @@ export function AddExpenseModal({ group, onClose, onSubmit }: AddExpenseModalPro
         console.warn('Error fetching group participants', err);
       }
 
-      // Combine registered members (groupMembers may include pending) with mapped pending and participant members
+      // Combine registered members with mapped pending and participant members
       const allMembers = [
         ...groupMembers,
         ...mappedPendingMembers,
         ...participantMembers,
       ];
 
-      setMembers(allMembers);
+      // Filtrer les doublons : on élimine les entrées ayant le même user_id ou la même adresse e‑mail (pour les
+      // participants/pending sans user_id). Cela évite de voir plusieurs lignes identiques dans les listes.
+      const seenUserIds: Set<string> = new Set();
+      const seenEmails: Set<string> = new Set();
+      const uniqueMembers: any[] = [];
+      for (const m of allMembers) {
+        const uid = m.user_id;
+        const email = m.user?.email;
+        if (uid && seenUserIds.has(uid)) continue;
+        if (!uid && email && seenEmails.has(email)) continue;
+        uniqueMembers.push(m);
+        if (uid) seenUserIds.add(uid);
+        else if (email) seenEmails.add(email);
+      }
 
-      // Initialize the participant selection list with all members selected by default
-      const initialParticipants = allMembers.map((member: any) => ({
+      setMembers(uniqueMembers);
+
+      // Initialiser la liste des participants : tous sélectionnés par défaut
+      const initialParticipants = uniqueMembers.map((member: any) => ({
         user_id: member.user_id,
         amount_owed: 0,
         selected: true,
       }));
 
+      // Déterminer le payeur par défaut : l'utilisateur courant s'il est présent dans les membres
+      // sinon le premier membre non pending, sinon le premier membre tout court.
+      let defaultPayer = '';
+      if (currentUser) {
+        const me = uniqueMembers.find((m: any) => !m.isPending && m.user_id === currentUser.id);
+        if (me) defaultPayer = me.user_id;
+      }
+      if (!defaultPayer) {
+        const firstRegistered = uniqueMembers.find((m: any) => !m.isPending);
+        defaultPayer = firstRegistered?.user_id || uniqueMembers[0]?.user_id || '';
+      }
+
       setFormData((prev) => ({
         ...prev,
         participants: initialParticipants,
-        // Default payer: current user if defined, otherwise first non-pending member
-        paid_by:
-          currentUser?.id ||
-          ((allMembers.find((m: any) => !m.isPending) as any)?.user_id || allMembers[0]?.user_id || ''),
+        paid_by: defaultPayer,
       }));
       
     } catch (err: any) {
@@ -375,23 +399,29 @@ export function AddExpenseModal({ group, onClose, onSubmit }: AddExpenseModalPro
               onChange={(e) => setFormData(prev => ({ ...prev, paid_by: e.target.value }))}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
             >
-              {members.filter((m: any) => !m.isPending).map((member) => (
-                <option key={member.user_id} value={member.user_id}>
-                  {getMemberName(member.user_id)}
-                </option>
-              ))}
+              {/* Payer options : membres inscrits */}
+              {members
+                .filter((m: any) => !m.isPending)
+                .map((member) => (
+                  <option key={member.user_id} value={member.user_id}>
+                    {member.user_id === currentUser?.id ? 'Moi' : getDisplayName(member.user)}
+                  </option>
+                ))}
+              {/* Participants ou pending : affichage informatif sans suffixe et désactivé */}
               {members.filter((m: any) => m.isPending).length > 0 && (
-                <optgroup label="Membres en attente d'inscription">
-                  {members.filter((m: any) => m.isPending).map((member) => (
-                    <option key={member.user_id} value={member.user_id}>
-                      {getMemberName(member.user_id)}
-                    </option>
-                  ))}
+                <optgroup label="Participants sans compte">
+                  {members
+                    .filter((m: any) => m.isPending)
+                    .map((member) => (
+                      <option key={member.user_id} value={member.user_id} disabled>
+                        {getDisplayName(member.user)}
+                      </option>
+                    ))}
                 </optgroup>
               )}
             </select>
             <p className="text-sm text-gray-500 mt-1">
-              Les participants en attente peuvent être sélectionnés comme payeur. Lorsqu'ils s'inscriront, leurs dépenses payées leur seront automatiquement attribuées.
+              Les membres en attente d'inscription ne peuvent pas être sélectionnés comme payeur
             </p>
           </div>
 
